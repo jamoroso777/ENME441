@@ -5,6 +5,9 @@ import math
 GPIO.setmode(GPIO.BCM)
 pins = [2,3,4,17,27,22,10,9,11,5]
 
+button_pin = 6
+GPIO.setup(button_pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+
 
 initial_f = 500
 pwms = []
@@ -16,6 +19,15 @@ for pin in pins:
 
 f= 0.2
 phase_step = math.pi/11
+direction = 1
+
+def change_direction(button_pin):
+	global direction
+	direction *= -1
+	print("Direction changed")
+
+GPIO.add_event_detect(button_pin, GPIO.RISING, callback=change_direction, bouncetime=300)
+
 
 try:
 	t_0 = time.time()
@@ -35,5 +47,5 @@ except KeyboardInterrup:
 finally:
 	for p in pwms:
 		p.stop()
-		GPIO.cleanup()
+	GPIO.cleanup()
 
