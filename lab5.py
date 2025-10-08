@@ -10,9 +10,9 @@ initial_f = 500
 pwms = []
 for pin in pins:
 	GPIO.setup(pin, GPIO.OUT)
-	p = GPIO.pwm(pin, initial_f)
-	p.start(0)
-	pwms.append(p)
+	pwm = GPIO.PWM(pin, initial_f)
+	pwm.start(0)
+	pwms.append(pwm)
 
 f= 0.2
 phase_step = math.pi/11
