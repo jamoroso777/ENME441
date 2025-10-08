@@ -36,7 +36,7 @@ try:
 		t = time.time() - t_0
 
 		for i, p in enumerate(pwms):
-			phi = i*phase_step
+			phi = direction*i*phase_step
 			B = math.sin(2*math.pi*f*t - phi)**2
 
 			Duty_Cycle = B*100
