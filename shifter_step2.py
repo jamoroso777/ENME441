@@ -4,9 +4,9 @@ import threading
 import RPi.GPIO as GPIO
 from shifter import Shifter
 
-dataPin, latchPin, clockPin = 23, 24, 25
+serialPin, latchPin, clockPin = 23, 24, 25
 
-led = Shifter(dataPin, clockPin, latchPin)
+led = Shifter(serialPin, clockPin, latchPin)
 
 position = 3
 pattern = 1<<position

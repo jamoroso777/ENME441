@@ -9,7 +9,7 @@ class Shifter:
 
 
     GPIO.setmode(GPIO.BCM)
-    GPIO.setup(dataPin, GPIO.OUT)
+    GPIO.setup(serialPin, GPIO.OUT)
     GPIO.setup(latchPin, GPIO.OUT, initial=0)  # start latch & clock low
     GPIO.setup(clockPin, GPIO.OUT, initial=0)  
 
@@ -25,11 +25,11 @@ def shiftByte(self, b):
   self.ping(self.latchPin)
 
 if __name__=="__main__":
-  dataPin, latchPin, clockPin = 23, 24, 25
+  serialPin, latchPin, clockPin = 23, 24, 25
   pattern = 0b01100110        # 8-bit pattern to display on LED bar
 
   try:
-    shifter = Shifter(dataPin. clockPin, latchPin)
+    shifter = Shifter(serialPin, clockPin, latchPin)
     shifter.shiftByte(pattern)
     while 1: 
       pass
