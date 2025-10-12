@@ -42,4 +42,4 @@ class Bug:
         if self.__thread:
             self.__thread.join()
         self.__shifter.shiftByte(0)  # turn off all LEDs
-        GPIO.cleanup()
+ 
