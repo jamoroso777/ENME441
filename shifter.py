@@ -10,7 +10,7 @@ class Shifter:
 
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(serialPin, GPIO.OUT)
-    GPIO.setup(latchPin, GPIO.OUT, initial=0)  # start latch & clock low
+    GPIO.setup(latchPin, GPIO.OUT, initial=0)  
     GPIO.setup(clockPin, GPIO.OUT, initial=0)  
 
   def ping(self, pin):
