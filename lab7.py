@@ -1,90 +1,75 @@
 #!/usr/bin/env python3
-import cgi
-import cgitb
 import RPi.GPIO as GPIO
-import os
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import urllib.parse
 
-cgitb.enable()  # Enable detailed error messages in browser
-
-# ---------- GPIO SETUP ----------
 GPIO.setmode(GPIO.BCM)
 
-# Define which GPIO pins the LEDs are connected to
-led_pins = [17, 27, 22]  # LED 1, LED 2, LED 3
-
-# Set up PWM on each LED pin
-pwms = []
+# Define LED pins
+led_pins = [17, 27, 22]
 for pin in led_pins:
     GPIO.setup(pin, GPIO.OUT)
-    pwm = GPIO.PWM(pin, 1000)  # 1 kHz frequency
+    GPIO.output(pin, GPIO.LOW)
+
+# Create PWM objects for each LED (1kHz frequency)
+pwms = [GPIO.PWM(pin, 1000) for pin in led_pins]
+for pwm in pwms:
     pwm.start(0)
-    pwms.append(pwm)
 
-# ---------- LOAD PREVIOUS BRIGHTNESS VALUES ----------
-brightness_file = "/tmp/led_brightness.txt"
+# Track brightness levels
+led_brightness = [0, 0, 0]
 
-if os.path.exists(brightness_file):
-    with open(brightness_file, "r") as f:
-        try:
-            led_brightness = [int(x) for x in f.read().split()]
-        except ValueError:
-            led_brightness = [0, 0, 0]
-else:
-    led_brightness = [0, 0, 0]
-    print("program started")
+class LEDHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/html")
+        self.end_headers()
+        self.wfile.write(self.html_page().encode("utf-8"))
 
-# ---------- HANDLE FORM SUBMISSION ----------
-form = cgi.FieldStorage()
-if "led" in form and "brightness" in form:
-    led_index = int(form["led"].value) - 1
-    brightness = int(form["brightness"].value)
+    def do_POST(self):
+        content_length = int(self.headers['Content-Length'])
+        post_data = self.rfile.read(content_length).decode("utf-8")
+        data = urllib.parse.parse_qs(post_data)
 
-    # Clamp brightness between 0–100 just in case
-    brightness = max(0, min(100, brightness))
+        # Get LED and brightness
+        led = int(data.get("led", [1])[0]) - 1
+        brightness = int(data.get("brightness", [0])[0])
+        led_brightness[led] = brightness
 
-    # Update stored brightness and apply it to the correct LED
-    led_brightness[led_index] = brightness
-    pwms[led_index].ChangeDutyCycle(brightness)
+        pwms[led].ChangeDutyCycle(brightness)
 
-    # Save updated values to file
-    with open(brightness_file, "w") as f:
-        f.write(" ".join(map(str, led_brightness)))
+        # Refresh page
+        self.send_response(303)
+        self.send_header('Location', '/')
+        self.end_headers()
 
-# ---------- GENERATE HTML RESPONSE ----------
-print("Content-type: text/html\n")
-print(f"""
-<html>
-<head>
-<title>LED Brightness Control</title>
-<style>
-  body {{
-    font-family: Arial, sans-serif;
-  }}
-  .control-box {{
-    border: 1px solid #ccc;
-    width: 220px;
-    padding: 10px;
-    border-radius: 8px;
-  }}
-  input[type=range] {{
-    width: 100%;
-  }}
-</style>
-</head>
-<body>
-<div class="control-box">
-  <form method="POST" action="/cgi-bin/led_control.py">
-    <label for="brightness"><b>Brightness level:</b></label><br>
-    <input type="range" id="brightness" name="brightness" min="0" max="100" value="0"><br><br>
+    def html_page(self):
+        html = f"""<html><head><title>LED Brightness Control</title></head>
+        <body style="font-family:Arial;">
+        <h2>LED Brightness Control</h2>
+        <form method="POST" action="/">
+        <label>Brightness level:</label><br>
+        <input type="range" name="brightness" min="0" max="100" value="0"><br><br>
 
-    <b>Select LED:</b><br>
-    <input type="radio" name="led" value="1" checked> LED 1 ({led_brightness[0]}%)<br>
-    <input type="radio" name="led" value="2"> LED 2 ({led_brightness[1]}%)<br>
-    <input type="radio" name="led" value="3"> LED 3 ({led_brightness[2]}%)<br><br>
+        <b>Select LED:</b><br>
+        <input type="radio" name="led" value="1" checked> LED 1 ({led_brightness[0]}%)<br>
+        <input type="radio" name="led" value="2"> LED 2 ({led_brightness[1]}%)<br>
+        <input type="radio" name="led" value="3"> LED 3 ({led_brightness[2]}%)<br><br>
 
-    <input type="submit" value="Change Brightness">
-  </form>
-</div>
-</body>
-</html>
-""")
+        <input type="submit" value="Change Brightness">
+        </form>
+        </body></html>"""
+        return html
+
+# Run the server
+try:
+    print("Starting web server on http://0.0.0.0:8080 ...")
+    with HTTPServer(('', 8080), LEDHandler) as server:
+        server.serve_forever()
+except KeyboardInterrupt:
+    pass
+finally:
+    for pwm in pwms:
+        pwm.stop()
+    GPIO.cleanup()
+    print("Server stopped, GPIO cleaned up.")
