@@ -2,28 +2,29 @@ import RPi.GPIO as GPIO
 import socket
 
 GPIO.setmode(GPIO.BCM)
-led_pins = [17,27,22]
+led_pins = [17, 27, 22]
 for pin in led_pins:
-	GPIO.setup(pin, GPIO.OUT)
-led_pwm = [GPIO.pwm(pin, 100) for pin in led_pins]
+    GPIO.setup(pin, GPIO.OUT)
+
+led_pwm = [GPIO.PWM(pin, 100) for pin in led_pins]
 for pwm in led_pwm:
-	pwm.start(0)
+    pwm.start(0)
 
-# Helper function to extract key,value pairs of POST data
+#helper function
 def parsePOSTdata(data):
- data_dict = {}
- idx = data.find('\r\n\r\n')+4
- if idx < 4:
- 	return data_dict
- data = data[idx:]
- data_pairs = data.split('&')
- for pair in data_pairs:
- 	key_val = pair.split('=')
- 	if len(key_val) == 2:
- 		data_dict[key_val[0]] = key_val[1]
- return data_dict
+    data_dict = {}
+    idx = data.find('\r\n\r\n') + 4
+    if idx < 4:
+        return data_dict
+    data = data[idx:]
+    data_pairs = data.split('&')
+    for pair in data_pairs:
+        key_val = pair.split('=')
+        if len(key_val) == 2:
+            data_dict[key_val[0]] = key_val[1]
+    return data_dict
 
-#HTML with help from LLM
+#HTML
 def html_page(selected_led=0, brightness=0):
     led_states = ["", "", ""]
     led_states[selected_led] = "checked"
@@ -66,50 +67,52 @@ def html_page(selected_led=0, brightness=0):
 </body>
 </html>"""
 
-#server 
-def start_server():
-	brightess_levels = [0,0,0]
-	host, port = '', 8080
-	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-	s.bind((host,port))
-	s.listen(1)
-	print(f"server running on port {port}")
+#Server
+def run_server():
+    brightness_levels = [0, 0, 0]
+    host, port = '', 8080
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind((host, port))
+    s.listen(1)
+    print(f"Server running on port {port}...")
 
-while True:
-	conn, addr = s.accept()
-	request = conn.recv(1024).decode('utf-8')
-	print(f"request from {addr}")
-	print(request)
+    while True:
+        conn, addr = s.accept()
+        request = conn.recv(1024).decode('utf-8')
+        print(f"Request from {addr}")
+        print(request)
 
-	selected_led = 0 
-	brightness = 0
+        selected_led = 0
+        brightness = 0
 
-	if "POST" in request:
-		data = parsePOSTdata(request)
-		if "led" in data and "brightness" in data:
-			selected_led= int(data["led"])
-			brightness= int(data["brightness"])
-			brightess_levels[selected_led]= brightness
-			led_pwm[selected_led].ChangeDutyCycle(brightness)
-			print(f"led {selected_led+1} set to {brightness}%")
+        if "POST" in request:
+            data = parsePOSTdata(request)
+            if "led" in data and "brightness" in data:
+                selected_led = int(data["led"])
+                brightness = int(data["brightness"])
+                brightness_levels[selected_led] = brightness
+                led_pwm[selected_led].ChangeDutyCycle(brightness)
+                print(f"LED {selected_led + 1} set to {brightness}%")
 
-	responce_body = html_page(selected_led, brightess_levels[selected_led])
-	responce = ("HTTP/1.1 200 OK\r\n"
+        response_body = html_page(selected_led, brightness_levels[selected_led])
+        response = (
+            "HTTP/1.1 200 OK\r\n"
             "Content-Type: text/html\r\n"
             f"Content-Length: {len(response_body)}\r\n"
             "Connection: close\r\n"
             "\r\n"
             + response_body
-    )
-    conn.sendall(response.encode('utf-8'))
-    conn.close()
+        )
 
-    if __name__ == "__main__":
+        conn.sendall(response.encode('utf-8'))
+        conn.close()
+
+#main
+if __name__ == "__main__":
     try:
         run_server()
-        print("server started on port 8080")
-   except KeyboardInterrupt:
-   		pass
+    except KeyboardInterrupt:
+        print("\nServer stopped.")
     finally:
         for pwm in led_pwm:
             pwm.stop()

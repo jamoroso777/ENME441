@@ -5,6 +5,7 @@ GPIO.setmode(GPIO.BCM)
 led_pins = [17, 27, 22]
 for pin in led_pins:
     GPIO.setup(pin, GPIO.OUT)
+
 led_pwm = [GPIO.PWM(pin, 1000) for pin in led_pins]
 for pwm in led_pwm:
     pwm.start(0)
@@ -23,7 +24,8 @@ def parsePOSTdata(data):
             data_dict[key_val[0]] = key_val[1]
     return data_dict
 
-#HTML with java code help from LLM
+
+# HTML with JavaScript 
 def html_page(brightness_levels):
     return f"""<!DOCTYPE html>
 <html>
@@ -81,7 +83,8 @@ function updateBrightness(led, value) {{
 </body>
 </html>"""
 
-#server
+
+# server
 def run_server():
     brightness_levels = [0, 0, 0]
     host, port = '', 8080
@@ -99,11 +102,14 @@ def run_server():
         if "POST" in request:
             data = parsePOSTdata(request)
             if "led" in data and "brightness" in data:
-                led = int(data["led"])
-                brightness = int(data["brightness"])
-                brightness_levels[led] = brightness
-                led_pwm[led].ChangeDutyCycle(brightness)
-                print(f"LED {led + 1} set to {brightness}%")
+                try:
+                    led = int(data["led"])
+                    brightness = int(data["brightness"])
+                    brightness_levels[led] = brightness
+                    led_pwm[led].ChangeDutyCycle(brightness)
+                    print(f"LED {led + 1} set to {brightness}%")
+                except Exception as e:
+                    print(f"Error processing POST data: {e}")
 
         response_body = html_page(brightness_levels)
         response = (
@@ -117,12 +123,12 @@ def run_server():
         conn.sendall(response.encode('utf-8'))
         conn.close()
 
-    if __name__ == "__main__":
-        try:
-            run_server()
-            print("server started on port 8080")
-   except KeyboardInterrupt:
-        pass
+
+if __name__ == "__main__":
+    try:
+        run_server()
+    except KeyboardInterrupt:
+        print("Server stopped by user.")
     finally:
         for pwm in led_pwm:
             pwm.stop()
