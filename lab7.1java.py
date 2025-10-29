@@ -118,9 +118,9 @@ def run_server():
         conn.close()
 
     if __name__ == "__main__":
-    try:
-        run_server()
-        print("server started on port 8080")
+        try:
+            run_server()
+            print("server started on port 8080")
    except KeyboardInterrupt:
         pass
     finally:

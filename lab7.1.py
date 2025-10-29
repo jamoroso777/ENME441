@@ -66,6 +66,7 @@ def html_page(selected_led=0, brightness=0):
 </body>
 </html>"""
 
+#server 
 def start_server():
 	brightess_levels = [0,0,0]
 	host, port = '', 8080
@@ -99,9 +100,9 @@ while True:
             "Connection: close\r\n"
             "\r\n"
             + response_body
-        )
-       	conn.sendall(response.encode('utf-8'))
-        conn.close()
+    )
+    conn.sendall(response.encode('utf-8'))
+    conn.close()
 
     if __name__ == "__main__":
     try:
