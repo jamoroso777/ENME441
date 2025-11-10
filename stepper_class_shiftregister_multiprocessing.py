@@ -1,134 +1,104 @@
 # stepper_class_shiftregister_multiprocessing.py
 #
-# Stepper class for Lab 8 – simultaneous multi-motor control
-#
-# Uses multiprocessing and shared memory to coordinate
-# multiple steppers connected through one or more shift registers.
+# Final Lab 8 version – simultaneous motor control, minimal debug output
 
 import time
 import multiprocessing
-from shifter import Shifter   # custom Shifter class
+from shifter import Shifter
 
 class Stepper:
-    """
-    Supports operation of an arbitrary number of stepper motors using
-    one or more shift registers.
-
-    A class attribute (shifter_outputs) keeps track of all
-    shift register output values for all motors. This schema allows
-    simultaneous operation of multiple motors since each modifies only
-    its assigned bits in the shared output word.
-    """
-
-    # Class attributes
+    # Shared class attributes
     num_steppers = 0
-    shifter_outputs = 0
+    shifter_outputs = multiprocessing.Value('i', 0)  # shared across processes
     seq = [0b0001, 0b0011, 0b0010, 0b0110,
-           0b0100, 0b1100, 0b1000, 0b1001]  # 8-step CCW sequence
-    delay = 1200            # step delay [µs]
-    steps_per_degree = 4096 / 360.0  # 4096 steps/rev * 1/360 rev/deg
+           0b0100, 0b1100, 0b1000, 0b1001]
+    delay = 1200            # µs between steps
+    steps_per_degree = 4096.0 / 360.0
 
     def __init__(self, shifter, lock):
         self.s = shifter
-        self.angle = multiprocessing.Value('d', 0.0)   # shared double
+        self.angle = multiprocessing.Value('d', 0.0)  # shared across processes
         self.step_state = 0
         self.shifter_bit_start = 4 * Stepper.num_steppers
+        self.motor_id = Stepper.num_steppers + 1
         self.lock = lock
-
         Stepper.num_steppers += 1
 
-    # ----------------- Private helper methods -----------------
-
+    # Helper
     def __sgn(self, x):
-        if x == 0:
-            return 0
-        return int(abs(x) / x)
+        return 0 if x == 0 else int(abs(x) / x)
 
     def __step(self, dir):
-        """Perform one step in given direction (+1 or -1)."""
-        self.step_state += dir
-        self.step_state %= 8
+        """Take one step in given direction."""
+        self.step_state = (self.step_state + dir) % len(Stepper.seq)
 
-        # Create mask for this motor's 4 control bits
         mask = 0b1111 << self.shifter_bit_start
 
-        # Clear current bits for this motor only
-        Stepper.shifter_outputs &= ~mask
+        # Read-modify-write the shared outputs safely
+        with Stepper.shifter_outputs.get_lock():
+            val = Stepper.shifter_outputs.value
+            val &= ~mask
+            val |= Stepper.seq[self.step_state] << self.shifter_bit_start
+            Stepper.shifter_outputs.value = val
 
-        # Insert new step pattern bits
-        Stepper.shifter_outputs |= Stepper.seq[self.step_state] << self.shifter_bit_start
+            total_bits = max(8, Stepper.num_steppers * 4)
+            self.s.shiftWord(Stepper.shifter_outputs.value, total_bits)
 
-        # Send to shift register
-        self.s.shiftByte(Stepper.shifter_outputs)
-
-        # Update shared angle
+        # Update angle
         self.angle.value += dir / Stepper.steps_per_degree
-        self.angle.value %= 360.0  # keep in [0, 360)
+        self.angle.value %= 360.0
 
     def __rotate(self, delta):
-        """Rotate motor by delta degrees relative to current position."""
-        # Acquire lock if provided (optional — can be shared or independent)
-        self.lock.acquire()
-        try:
-            numSteps = int(Stepper.steps_per_degree * abs(delta))
-            direction = self.__sgn(delta)
-            for _ in range(numSteps):
-                self.__step(direction)
-                time.sleep(Stepper.delay / 1e6)
-        finally:
-            self.lock.release()
+        """Rotate by delta degrees (run in a separate process)."""
+        num_steps = int(abs(delta) * Stepper.steps_per_degree)
+        direction = self.__sgn(delta)
+        for _ in range(num_steps):
+            self.__step(direction)
+            time.sleep(Stepper.delay / 1e6)
 
-    # ----------------- Public methods -----------------
-
-    def rotate(self, delta):
-        """Rotate motor relative to current position in a separate process."""
-        time.sleep(0.1)
-        p = multiprocessing.Process(target=self.__rotate, args=(delta,))
-        p.start()
-
+    # Public methods
     def goAngle(self, target):
-        """
-        Move motor to an absolute target angle using the shortest path.
-        """
-        # Compute smallest signed angle difference (-180 to +180)
-        delta = target - self.angle.value
-        delta = (delta + 180) % 360 - 180
+        """Move to target angle using shortest path."""
+        current = self.angle.value
+        delta = (target - current + 180) % 360 - 180
+        print(f"[Motor {self.motor_id}] Starting goAngle({target}) "
+              f"from {current:.1f}°, delta={delta:.1f}°", flush=True)
 
-        # Launch rotation process
         p = multiprocessing.Process(target=self.__rotate, args=(delta,))
         p.start()
+
+        # Optional watcher process: wait until rotation should finish
+        def watcher(proc, motor_id, target):
+            proc.join()
+            print(f"[Motor {motor_id}] Finished goAngle({target})", flush=True)
+
+        watcher_proc = multiprocessing.Process(
+            target=watcher, args=(p, self.motor_id, target))
+        watcher_proc.start()
 
     def zero(self):
-        """Set current motor angle as zero."""
         self.angle.value = 0.0
+        print(f"[Motor {self.motor_id}] Zeroed (angle=0°)", flush=True)
 
 
-# ----------------- Example usage -----------------
+# ---------------- Example Lab Test ----------------
 if __name__ == '__main__':
-    from shifter import Shifter
-    import multiprocessing
-    import time
+    s = Shifter(data=16, clock=21, latch=20)
 
-    # Initialize shift register (adjust pins to match your wiring)
-    s = Shifter(data=16, latch=20, clock=21)
-
-    # Create separate locks so both motors can step simultaneously
+    # Separate locks for simultaneous motion
     lock1 = multiprocessing.Lock()
     lock2 = multiprocessing.Lock()
 
-    # Instantiate two independent stepper motors
     m1 = Stepper(s, lock1)
     m2 = Stepper(s, lock2)
 
-    # Zero both motors
     m1.zero()
     m2.zero()
 
-    print("Starting simultaneous goAngle() test...")
-    time.sleep(1)
+    time.sleep(0.5)
+    print("\n=== Lab 8 simultaneous goAngle() demo ===\n", flush=True)
 
-    # === Lab 8 Command Sequence ===
-    # Both motors should move concurrently where applicable
+    # Motors operate simultaneously (independent locks)
     m1.goAngle(90)
     m1.goAngle(-45)
 
@@ -139,9 +109,8 @@ if __name__ == '__main__':
     m1.goAngle(135)
     m1.goAngle(0)
 
-    # Keep program alive while motors move
     try:
         while True:
             time.sleep(0.1)
     except KeyboardInterrupt:
-        print("\nDemo complete — stopping motors.")
+        print("\nDemo stopped.")
