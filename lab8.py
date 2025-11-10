@@ -1,75 +1,70 @@
 # stepper_class_shiftregister_multiprocessing.py
 #
-# Stepper class (edited for simultaneous motor operation)
+# Stepper class (fixed for simultaneous multi-motor operation via shift register)
 #
-# This version allows multiple stepper motors driven by the same shift register
-# to move simultaneously. Each motor updates only its own 4-bit region in the
-# shared shift register output using proper bitmasking.
+# This version allows multiple stepper motors (each using 4 bits of the same shift register)
+# to move simultaneously, with proper multiprocessing and shared memory handling.
 
 import time
 import multiprocessing
-from shifter import Shifter   # our custom Shifter class
+from shifter import Shifter   # custom Shifter class
 
 class Stepper:
     """
     Supports operation of an arbitrary number of stepper motors using
     one or more shift registers.
 
-    A class attribute (shifter_outputs) keeps track of all
-    shift register output values for all motors.  In addition to
-    simplifying sequential control of multiple motors, this schema also
-    makes simultaneous operation of multiple motors possible.
-
-    Motor instantiation sequence is inverted from the shift register outputs.
-    For example, in the case of 2 motors, the 2nd motor must be connected
-    with the first set of shift register outputs (Qa-Qd), and the 1st motor
-    with the second set of outputs (Qe-Qh). This is because the MSB of
-    the register is associated with Qa, and the LSB with Qh.
+    Each motor uses 4 bits of the shared shift register outputs.
+    The motors can now operate simultaneously, since all processes
+    share a single 'shifter_outputs' variable through multiprocessing.Value.
     """
 
     # Class attributes:
-    num_steppers = 0      # track number of Steppers instantiated
-    shifter_outputs = 0   # track shift register outputs for all motors
-    seq = [0b0001,0b0011,0b0010,0b0110,0b0100,0b1100,0b1000,0b1001] # CCW sequence
+    num_steppers = 0
+    shifter_outputs = multiprocessing.Value('i', 0)  # shared integer across processes
+    seq = [0b0001,0b0011,0b0010,0b0110,0b0100,0b1100,0b1000,0b1001]  # 8-step half-stepping sequence
     delay = 1200          # delay between motor steps [us]
-    steps_per_degree = 4096 / 360    # 4096 steps/rev * 1/360 rev/deg
+    steps_per_degree = 4096 / 360  # 4096 steps per rev
 
     def __init__(self, shifter, lock):
-        self.s = shifter           # shift register
-        self.angle = 0             # current output shaft angle
-        self.step_state = 0        # track position in sequence
+        self.s = shifter
+        self.angle = 0
+        self.step_state = 0
         self.shifter_bit_start = 4 * Stepper.num_steppers  # starting bit position
-        self.lock = lock           # multiprocessing lock
-
-        Stepper.num_steppers += 1  # increment the instance count
+        self.lock = lock
+        Stepper.num_steppers += 1
 
     # Signum function:
     def __sgn(self, x):
         if x == 0:
             return 0
         else:
-            return int(abs(x)/x)
+            return int(abs(x) / x)
 
     # Move a single +/-1 step in the motor sequence:
     def __step(self, dir):
-        # Update step state
+        # Update sequence state
         self.step_state = (self.step_state + dir) % 8
-
-        # Create a 4-bit mask for this motor's output region
         mask = 0b1111 << self.shifter_bit_start
 
-        # Clear this motor's bits, then write the new pattern
-        Stepper.shifter_outputs &= ~mask
-        Stepper.shifter_outputs |= (Stepper.seq[self.step_state] << self.shifter_bit_start)
-
-        # Safely send the new output to the shift register
         with self.lock:
-            self.s.shiftByte(Stepper.shifter_outputs)
+            # Read the shared shift register value
+            val = Stepper.shifter_outputs.value
 
-        # Update angle tracking
+            # Clear this motor’s 4 bits
+            val &= ~mask
+
+            # Write new sequence pattern to its 4 bits
+            val |= (Stepper.seq[self.step_state] << self.shifter_bit_start)
+
+            # Save and output the updated byte
+            Stepper.shifter_outputs.value = val
+            self.s.shiftByte(val)
+
+        # Update motor angle tracking
         self.angle = (self.angle + dir / Stepper.steps_per_degree) % 360
 
-    # Move relative angle from current position:
+    # Rotate a relative angle (blocking)
     def __rotate(self, delta):
         numSteps = int(Stepper.steps_per_degree * abs(delta))
         dir = self.__sgn(delta)
@@ -77,15 +72,14 @@ class Stepper:
             self.__step(dir)
             time.sleep(Stepper.delay / 1e6)
 
-    # Public method for rotation using multiprocessing
+    # Public rotate (non-blocking)
     def rotate(self, delta):
-        time.sleep(0.05)
+        # Spawn a process so multiple motors can move simultaneously
         p = multiprocessing.Process(target=self.__rotate, args=(delta,))
         p.start()
 
-    # Move to an absolute angle taking the shortest possible path:
+    # Move to an absolute angle taking the shortest path:
     def goAngle(self, target_angle):
-        # Compute shortest rotation direction
         delta = (target_angle - self.angle + 540) % 360 - 180
         self.rotate(delta)
 
@@ -94,29 +88,26 @@ class Stepper:
         self.angle = 0
 
 
-# Example use:
-
+# Example usage:
 if __name__ == '__main__':
-    s = Shifter(data=16, latch=20, clock=21)   # set up Shifter
+    s = Shifter(data=16, latch=20, clock=21)   # Setup shift register
+    lock = multiprocessing.Lock()              # Shared lock for hardware access
 
-    # Use multiprocessing.Lock() to prevent write collisions
-    lock = multiprocessing.Lock()
+    # Instantiate in REVERSE ORDER (Qa–Qd first, Qe–Qh second)
+    m2 = Stepper(s, lock)  # Motor 2 uses Qa–Qd (upper bits)
+    m1 = Stepper(s, lock)  # Motor 1 uses Qe–Qh (lower bits)
 
-    # Instantiate 2 Steppers:
-    m2 = Stepper(s, lock)
-    m1 = Stepper(s, lock)
-
-    # Zero the motors:
+    # Zero both
     m1.zero()
     m2.zero()
 
-    # Move both simultaneously:
+    # Move both simultaneously
+    print("Rotating both motors...")
     m1.rotate(180)
-    m2.rotate(-90)
+    m2.rotate(-180)
 
-    # While motors are running, main can continue doing other work
     try:
         while True:
             time.sleep(0.1)
     except KeyboardInterrupt:
-        print('\nEnd of program.')
+        print("\nEnd of program.")
