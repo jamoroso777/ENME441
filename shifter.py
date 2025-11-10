@@ -1,37 +1,48 @@
-import RPi.GPIO as GPIO
-import time
+# Shift register class
 
-class Shifter:
-  def __init__(self, serialPin, clockPin, latchPin):
-    self.serialPin = serialPin
-    self.clockPin = clockPin
-    self.latchPin = latchPin
+from RPi import GPIO
+from time import sleep
+
+GPIO.setmode(GPIO.BCM)
+
+class Shifter():
+
+    def __init__(self, data, clock, latch):
+        self.dataPin = data
+        self.latchPin = latch
+        self.clockPin = clock
+        GPIO.setup(self.dataPin, GPIO.OUT)
+        GPIO.setup(self.latchPin, GPIO.OUT)
+        GPIO.setup(self.clockPin, GPIO.OUT)
+
+    def ping(self, p):  # ping the clock or latch pin
+        GPIO.output(p,1)
+        sleep(0)
+        GPIO.output(p,0)
+
+    # Shift all bits in an arbitrary-length word, allowing
+    # multiple 8-bit shift registers to be chained (with overflow
+    # of SR_n tied to input of SR_n+1):
+    def shiftWord(self, dataword, num_bits):
+        for i in range((num_bits+1) % 8):  # Load bits short of a byte with 0
+            # self.dataPin.value(0)  # MicroPython for ESP32
+            GPIO.output(self.dataPin, 0) 
+            self.ping(self.clockPin)
+        for i in range(num_bits):          # Send the word
+            # self.dataPin.value(dataword & (1<<i))  # MicroPython for ESP32
+            GPIO.output(self.dataPin, dataword & (1<<i))
+            self.ping(self.clockPin)
+        self.ping(self.latchPin)
+
+    # Shift all bits in a single byte:
+    def shiftByte(self, databyte):
+        self.shiftWord(databyte, 8)
 
 
-    GPIO.setmode(GPIO.BCM)
-    GPIO.setup(serialPin, GPIO.OUT)
-    GPIO.setup(latchPin, GPIO.OUT, initial=0)  
-    GPIO.setup(clockPin, GPIO.OUT, initial=0)  
-
-  def ping(self, pin):
-    GPIO.output(pin, 1)
-    time.sleep(0)
-    GPIO.output(pin, 0)
-
-  def shiftByte(self, b):
-    for i in range(8):
-      GPIO.output(self.serialPin, b & (1<<i))
-      self.ping(self.clockPin)
-    self.ping(self.latchPin)
-
-if __name__=="__main__":
-  serialPin, latchPin, clockPin = 23, 24, 25
-  pattern = 0b01100110        # 8-bit pattern to display on LED bar
-
-  try:
-    shifter = Shifter(serialPin, clockPin, latchPin)
-    shifter.shiftByte(pattern)
-    while 1: 
-      pass
-  except:
-    GPIO.cleanup()
+# Example:
+#
+# from time import sleep
+# s = Shifter(data=16,clock=20,latch=21)   # convenient Pi pins
+# for i in range(256):
+#     s.shiftByte(i)
+#     sleep(0.1)
