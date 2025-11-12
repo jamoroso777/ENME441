@@ -124,18 +124,19 @@ if __name__ == '__main__':
     p2 = m2.goAngle(-90)
     p1.join()
     p2.join()
-
+    time.sleep(3)
     p1 = m1.goAngle(-45)
     p2 = m2.goAngle(45)
     p1.join()
     p2.join()
+    time.sleep(3)
 
     p1 = m1.goAngle(-135)
     p1.join()
-
+    time.sleep(3)
     p1 = m1.goAngle(135)
     p1.join()
-
+    time.sleep(3)
     p1 = m1.goAngle(0)
     p1.join()
 
