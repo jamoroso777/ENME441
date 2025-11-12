@@ -6,9 +6,10 @@ class Stepper:
     """
     Multi-stepper class using shift registers.
     Each motor uses 4 bits of the shared register.
-    Tracks angle and step_state in shared memory.
+    Tracks angle and step_state in shared memory for cross-process access.
     """
 
+    # Class attributes
     num_steppers = 0
     shifter_outputs = multiprocessing.Value('i', 0)  # shared shift register
     seq = [0b0001,0b0011,0b0010,0b0110,0b0100,0b1100,0b1000,0b1001]  # 8-step half-step
@@ -34,6 +35,7 @@ class Stepper:
             self.step_state.value = (self.step_state.value + dir) % 8
             seq_val = Stepper.seq[self.step_state.value]
 
+        # Write to shift register with lock
         with self.lock:
             val = Stepper.shifter_outputs.value
             val &= ~mask
@@ -52,17 +54,19 @@ class Stepper:
             self.__step(dir)
             time.sleep(Stepper.delay / 1e6)
 
-    # New method: goAngle in a process (blocking)
-    def goAngleProcess(self, target_angle):
-        p = multiprocessing.Process(target=self.goAngle, args=(target_angle,))
-        p.start()
-        p.join()
-
+    # The core goAngle method (runs inside a process)
     def goAngle(self, target_angle):
         with self.angle.get_lock():
             current = self.angle.value
+        # Minimal delta [-180,180]
         delta = (target_angle - current + 540) % 360 - 180
         self.__rotate(delta)
+
+    # Public wrapper for blocking calls (always spawns a process)
+    def goAngleBlocking(self, target_angle):
+        p = multiprocessing.Process(target=self.goAngle, args=(target_angle,))
+        p.start()
+        p.join()
 
     def zero(self):
         with self.angle.get_lock():
@@ -70,7 +74,7 @@ class Stepper:
         with self.step_state.get_lock():
             self.step_state.value = 0
 
-# Helper to move multiple motors simultaneously
+# Helper function for simultaneous moves
 def goAnglesSimultaneous(motors, target_angles):
     procs = []
     for m, a in zip(motors, target_angles):
@@ -81,7 +85,7 @@ def goAnglesSimultaneous(motors, target_angles):
         p.join()
 
 # =====================
-# Main program
+# Main Program
 # =====================
 if __name__ == '__main__':
     s = Shifter(data=16, latch=20, clock=21)
@@ -91,25 +95,25 @@ if __name__ == '__main__':
     m1 = Stepper(s, lock)
     m2 = Stepper(s, lock)
 
-    # Step 1: Zero both
+    # Zero both motors
     m1.zero()
     m2.zero()
     print(f"Zeroed: Motor1 = {m1.angle.value:.2f}, Motor2 = {m2.angle.value:.2f}")
 
-    # Step 2: First simultaneous move
+    # First simultaneous move: m1=90°, m2=-90°
     goAnglesSimultaneous([m1, m2], [90, -90])
     print(f"After goAngle(90/-90): Motor1 = {m1.angle.value:.2f}, Motor2 = {m2.angle.value:.2f}")
 
-    # Step 3: Second simultaneous move
+    # Second simultaneous move: m1=-45°, m2=45°
     goAnglesSimultaneous([m1, m2], [-45, 45])
     print(f"After goAngle(-45/45): Motor1 = {m1.angle.value:.2f}, Motor2 = {m2.angle.value:.2f}")
 
-    # Step 4: Remaining Motor1 moves (blocking)
-    m1.goAngleProcess(-135)
+    # Remaining Motor1 moves (blocking, sequential)
+    m1.goAngleBlocking(-135)
     print(f"After m1.goAngle(-135): Motor1 = {m1.angle.value:.2f}, Motor2 = {m2.angle.value:.2f}")
 
-    m1.goAngleProcess(135)
+    m1.goAngleBlocking(135)
     print(f"After m1.goAngle(135): Motor1 = {m1.angle.value:.2f}, Motor2 = {m2.angle.value:.2f}")
 
-    m1.goAngleProcess(0)
+    m1.goAngleBlocking(0)
     print(f"After m1.goAngle(0): Motor1 = {m1.angle.value:.2f}, Motor2 = {m2.angle.value:.2f}")
