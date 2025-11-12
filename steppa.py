@@ -98,8 +98,8 @@ if __name__ == '__main__':
     lock = multiprocessing.Lock()
 
     # Instantiate in REVERSE ORDER (Qa–Qd first, Qe–Qh second)
-    m2 = Stepper(s, lock)  # Motor 2 uses Qa–Qd (upper bits)
-    m1 = Stepper(s, lock)  # Motor 1 uses Qe–Qh (lower bits)
+    m1 = Stepper(s, lock)  # Motor 2 uses Qa–Qd (upper bits)
+    m2 = Stepper(s, lock)  # Motor 1 uses Qe–Qh (lower bits)
 
     m1.zero()
     m2.zero()
