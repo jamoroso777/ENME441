@@ -76,7 +76,7 @@ class Stepper:
             current_angle = self.angle.value
 
         # Compute delta as shortest path [-180, 180]
-        delta = -((target_angle - current_angle + 540) % 360 - 180)
+        delta = (target_angle - current_angle + 540) % 360 - 180
 
         # Spawn process for simultaneous motion
         p = multiprocessing.Process(target=self.__rotate, args=(delta,))
