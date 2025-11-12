@@ -6,7 +6,7 @@ class Stepper:
     """
     Multi-stepper class using shift registers.
     Each motor uses 4 bits of the shared register.
-    Tracks angle in shared memory for cross-process access.
+    Tracks angle and step_state in shared memory for cross-process access.
     """
 
     # Class attributes
@@ -19,8 +19,8 @@ class Stepper:
     def __init__(self, shifter, lock):
         self.s = shifter
         self.lock = lock
-        self.angle = multiprocessing.Value('d', 0.0)  # shared angle for this motor
-        self.step_state = 0
+        self.angle = multiprocessing.Value('d', 0.0)        # shared angle
+        self.step_state = multiprocessing.Value('i', 0)     # shared step state
         self.shifter_bit_start = 4 * Stepper.num_steppers
         Stepper.num_steppers += 1
 
@@ -30,13 +30,17 @@ class Stepper:
 
     # Step one sequence step
     def __step(self, dir):
-        self.step_state = (self.step_state + dir) % 8
         mask = 0b1111 << self.shifter_bit_start
+
+        # Update step_state atomically
+        with self.step_state.get_lock():
+            self.step_state.value = (self.step_state.value + dir) % 8
+            seq_val = Stepper.seq[self.step_state.value]
 
         with self.lock:
             val = Stepper.shifter_outputs.value
             val &= ~mask
-            val |= (Stepper.seq[self.step_state] << self.shifter_bit_start)
+            val |= (seq_val << self.shifter_bit_start)
             Stepper.shifter_outputs.value = val
             self.s.shiftByte(val)
 
@@ -68,6 +72,8 @@ class Stepper:
     def zero(self):
         with self.angle.get_lock():
             self.angle.value = 0.0
+        with self.step_state.get_lock():
+            self.step_state.value = 0
 
 # Helper function to move multiple motors simultaneously
 def goAnglesSimultaneous(motors, target_angles):
