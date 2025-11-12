@@ -107,10 +107,14 @@ if __name__ == '__main__':
     print("Rotating both motors simultaneously through sequence...")
     m1.goAngle(90)
     m2.goAngle(-90)
+    time.sleep(5)
     m1.goAngle(-45)
     m2.goAngle(45)
+    time.sleep(5)
     m1.goAngle(-135)
+    time.sleep(5)
     m1.goAngle(135)
+    time.sleep(5)
     m1.goAngle(0)
 
     try:
