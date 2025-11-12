@@ -103,8 +103,17 @@ if __name__ == '__main__':
 
     # Move both simultaneously
     print("Rotating both motors...")
-    m1.rotate(180)
-    m2.rotate(-180)
+ 
+  
+    m1.goAngle(90)
+    m1.goAngle(-45)
+    
+    m2.goAngle(-90)
+    m2.goAngle(45)
+
+    m1.goAngle(-135)
+    m1.goAngle(135)
+    m1.goAngle(0)
 
     try:
         while True:
