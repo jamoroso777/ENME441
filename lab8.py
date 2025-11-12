@@ -105,18 +105,21 @@ if __name__ == '__main__':
     # Move both simultaneously
     print("Rotating both motors...")
  
-  
+    print("setting m1 90, m2 -90")
     m1.goAngle(90)
     m2.goAngle(-90)
     time.sleep(2)
+    print("setting m1 -45, m2 45")
     m1.goAngle(-45)
     m2.goAngle(45)
     time.sleep(2)
-
+    print("setting m1 -135")
     m1.goAngle(-135)
     time.sleep(2)
+    print("setting m1 135")
     m1.goAngle(135)
     time.sleep(2)
+    print("set m1 0")
     m1.goAngle(0)
 
     try:
