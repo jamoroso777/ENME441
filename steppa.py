@@ -24,7 +24,7 @@ class Stepper:
     shifter_outputs = multiprocessing.Value('i', 0)  # shared integer for shift register bits
     seq = [0b0001,0b0011,0b0010,0b0110,0b0100,0b1100,0b1000,0b1001]  # 8-step sequence
     delay = 1200  # delay between motor steps [µs]
-    steps_per_degree = 4096 / 360  # 4096 steps per revolution
+    steps_per_degree = 1024 / 360  # 4096 steps per revolution
 
     def __init__(self, shifter, lock):
         self.s = shifter
