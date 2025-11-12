@@ -71,6 +71,10 @@ class Stepper:
 
 # Helper function to move multiple motors simultaneously
 def goAnglesSimultaneous(motors, target_angles):
+    """
+    motors: list of Stepper objects
+    target_angles: list of absolute angles
+    """
     procs = []
     for m, a in zip(motors, target_angles):
         p = multiprocessing.Process(target=m.goAngle, args=(a,))
@@ -86,34 +90,29 @@ if __name__ == '__main__':
     s = Shifter(data=16, latch=20, clock=21)
     lock = multiprocessing.Lock()
 
-    # Instantiate motors
-    m2 = Stepper(s, lock)  # uses Qa-Qd
-    m1 = Stepper(s, lock)  # uses Qe-Qh
+    # Instantiate motors (Motor1 = Qe-Qh, Motor2 = Qa-Qd)
+    m1 = Stepper(s, lock)  # Motor1
+    m2 = Stepper(s, lock)  # Motor2
 
-    # Sequence of commands with simultaneous motion where desired
     # Step 1: Zero both
     m1.zero()
     m2.zero()
     print(f"Zeroed: Motor1 = {m1.angle.value:.2f}, Motor2 = {m2.angle.value:.2f}")
 
-    # Step 2: First moves (both motors moving simultaneously)
+    # Step 2: First simultaneous move
     goAnglesSimultaneous([m1, m2], [90, -90])
-    print(f"After first goAngle: Motor1 = {m1.angle.value:.2f}, Motor2 = {m2.angle.value:.2f}")
+    print(f"After goAngle(90/-90): Motor1 = {m1.angle.value:.2f}, Motor2 = {m2.angle.value:.2f}")
 
-    # Step 3: Next moves in sequence
-    m1.goAngle(-45)
-    print(f"After m1.goAngle(-45): Motor1 = {m1.angle.value:.2f}, Motor2 = {m2.angle.value:.2f}")
+    # Step 3: Second simultaneous move
+    goAnglesSimultaneous([m1, m2], [-45, 45])
+    print(f"After goAngle(-45/45): Motor1 = {m1.angle.value:.2f}, Motor2 = {m2.angle.value:.2f}")
 
-    m2.goAngle(45)
-    print(f"After m2.goAngle(45): Motor1 = {m1.angle.value:.2f}, Motor2 = {m2.angle.value:.2f}")
-
-    # Step 4: m1 extreme moves
+    # Step 4: Remaining moves for Motor1 (blocking)
     m1.goAngle(-135)
     print(f"After m1.goAngle(-135): Motor1 = {m1.angle.value:.2f}, Motor2 = {m2.angle.value:.2f}")
 
     m1.goAngle(135)
     print(f"After m1.goAngle(135): Motor1 = {m1.angle.value:.2f}, Motor2 = {m2.angle.value:.2f}")
 
-    # Step 5: Return m1 to 0
     m1.goAngle(0)
     print(f"After m1.goAngle(0): Motor1 = {m1.angle.value:.2f}, Motor2 = {m2.angle.value:.2f}")
