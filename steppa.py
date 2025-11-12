@@ -131,12 +131,14 @@ if __name__ == '__main__':
     # Move motors simultaneously
     m1.goAngle(90)
     m2.goAngle(-90)
-
+    time.sleep(3)
     m1.goAngle(-45)
     m2.goAngle(45)
-
+    time.sleep(3)
     m1.goAngle(-135)
+    time.sleep(3)
     m1.goAngle(135)
+    time.sleep(3)
     m1.goAngle(0)
 
     try:
