@@ -82,7 +82,7 @@ class Stepper:
     def goAngle(self, target_angle):
         delta = (target_angle - self.angle + 540) % 360 - 180
         self.rotate(delta)
-        time.sleep(4)
+       
 
     # Set the motor zero point
     def zero(self):
@@ -108,17 +108,17 @@ if __name__ == '__main__':
     print("setting m1 90, m2 -90")
     m1.goAngle(90)
     m2.goAngle(-90)
-    #time.sleep(5)
+    time.sleep(5)
     print("setting m1 -45, m2 45")
     m1.goAngle(-45)
     m2.goAngle(45)
-   # time.sleep(5)
+    time.sleep(5)
     print("setting m1 -135")
     m1.goAngle(-135)
-    #time.sleep(5)
+    time.sleep(5)
     print("setting m1 135")
     m1.goAngle(135)
-    #time.sleep(5)
+    time.sleep(5)
     print("set m1 0")
     m1.goAngle(0)
 
