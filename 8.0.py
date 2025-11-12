@@ -6,15 +6,14 @@ class Stepper:
     """
     Multi-stepper class using shift registers.
     Each motor uses 4 bits of the shared register.
-    Tracks angle and step_state in shared memory for cross-process access.
+    Tracks angle and step_state in shared memory.
     """
 
-    # Class attributes
     num_steppers = 0
     shifter_outputs = multiprocessing.Value('i', 0)  # shared shift register
     seq = [0b0001,0b0011,0b0010,0b0110,0b0100,0b1100,0b1000,0b1001]  # 8-step half-step
     delay = 1200  # microseconds
-    steps_per_degree = 1024 / 360  # 1024 steps per 360°
+    steps_per_degree = 1024 / 360
 
     def __init__(self, shifter, lock):
         self.s = shifter
@@ -24,11 +23,9 @@ class Stepper:
         self.shifter_bit_start = 4 * Stepper.num_steppers
         Stepper.num_steppers += 1
 
-    # Sign function
     def __sgn(self, x):
         return 0 if x == 0 else int(abs(x) / x)
 
-    # Step one sequence step
     def __step(self, dir):
         mask = 0b1111 << self.shifter_bit_start
 
@@ -48,7 +45,6 @@ class Stepper:
         with self.angle.get_lock():
             self.angle.value = (self.angle.value + dir / Stepper.steps_per_degree) % 360
 
-    # Blocking rotation by relative angle
     def __rotate(self, delta):
         num_steps = int(Stepper.steps_per_degree * abs(delta))
         dir = self.__sgn(delta)
@@ -56,31 +52,26 @@ class Stepper:
             self.__step(dir)
             time.sleep(Stepper.delay / 1e6)
 
-    # Public rotation (blocking)
-    def rotate(self, delta):
-        self.__rotate(delta)
+    # New method: goAngle in a process (blocking)
+    def goAngleProcess(self, target_angle):
+        p = multiprocessing.Process(target=self.goAngle, args=(target_angle,))
+        p.start()
+        p.join()
 
-    # Move to absolute angle (blocking)
     def goAngle(self, target_angle):
         with self.angle.get_lock():
             current = self.angle.value
-        # Minimal delta: [-180,180]
         delta = (target_angle - current + 540) % 360 - 180
         self.__rotate(delta)
 
-    # Zero the motor
     def zero(self):
         with self.angle.get_lock():
             self.angle.value = 0.0
         with self.step_state.get_lock():
             self.step_state.value = 0
 
-# Helper function to move multiple motors simultaneously
+# Helper to move multiple motors simultaneously
 def goAnglesSimultaneous(motors, target_angles):
-    """
-    motors: list of Stepper objects
-    target_angles: list of absolute angles
-    """
     procs = []
     for m, a in zip(motors, target_angles):
         p = multiprocessing.Process(target=m.goAngle, args=(a,))
@@ -96,9 +87,9 @@ if __name__ == '__main__':
     s = Shifter(data=16, latch=20, clock=21)
     lock = multiprocessing.Lock()
 
-    # Instantiate motors (Motor1 = Qe-Qh, Motor2 = Qa-Qd)
-    m1 = Stepper(s, lock)  # Motor1
-    m2 = Stepper(s, lock)  # Motor2
+    # Motor1 = Qe-Qh, Motor2 = Qa-Qd
+    m1 = Stepper(s, lock)
+    m2 = Stepper(s, lock)
 
     # Step 1: Zero both
     m1.zero()
@@ -113,12 +104,12 @@ if __name__ == '__main__':
     goAnglesSimultaneous([m1, m2], [-45, 45])
     print(f"After goAngle(-45/45): Motor1 = {m1.angle.value:.2f}, Motor2 = {m2.angle.value:.2f}")
 
-    # Step 4: Remaining moves for Motor1 (blocking)
-    m1.goAngle(-135)
+    # Step 4: Remaining Motor1 moves (blocking)
+    m1.goAngleProcess(-135)
     print(f"After m1.goAngle(-135): Motor1 = {m1.angle.value:.2f}, Motor2 = {m2.angle.value:.2f}")
 
-    m1.goAngle(135)
+    m1.goAngleProcess(135)
     print(f"After m1.goAngle(135): Motor1 = {m1.angle.value:.2f}, Motor2 = {m2.angle.value:.2f}")
 
-    m1.goAngle(0)
+    m1.goAngleProcess(0)
     print(f"After m1.goAngle(0): Motor1 = {m1.angle.value:.2f}, Motor2 = {m2.angle.value:.2f}")
