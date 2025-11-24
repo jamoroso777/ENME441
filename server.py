@@ -1,143 +1,162 @@
-# server.py
-import time
-import threading
-from flask import Flask, jsonify, request, send_file
+import socket
+from urllib.parse import unquote_plus
+from stepper_class_shiftregister_multiprocessing import Stepper
+from shifter import Shifter
 import multiprocessing
 import RPi.GPIO as GPIO
 
-# Import your existing Stepper and Shifter code
-from stepper_class_shiftregister_multiprocessing import Stepper
-from shifter import Shifter  # should be your module that controls the shift register
 
-# --- Config ---
-AZIMUTH_STEPPER_INDEX = 0   # we will instantiate az then el so index 0 = azimuth
-ELEVATION_STEPPER_INDEX = 1
+# ---------------------------------------------------------
+# Helper: Parse POST data from request
+# ---------------------------------------------------------
+def parsePOSTdata(request):
+    try:
+        header, body = request.split("\r\n\r\n", 1)
+        params = {}
+        for pair in body.split("&"):
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                params[k] = unquote_plus(v)
+        return params
+    except:
+        return {}
 
-# Use the same pins you used before for the shifter
+
+# ---------------------------------------------------------
+# HTML page for the control UI
+# ---------------------------------------------------------
+def html_page(az, el):
+    return f"""
+<html>
+<head>
+<title>Laser Turret Control</title>
+<style>
+button {{
+  margin: 8px; padding: 10px 20px;
+}}
+</style>
+</head>
+<body>
+<h2>Laser Turret Control</h2>
+
+<h3>Azimuth</h3>
+<form method="POST">
+  <button name="axis" value="az">Az</button>
+  <input type="hidden" name="delta" value="-5">
+  <button type="submit">◀ -5°</button>
+</form>
+<form method="POST">
+  <input type="hidden" name="axis" value="az">
+  <input type="hidden" name="delta" value="5">
+  <button type="submit">+5° ▶</button>
+</form>
+
+<h3>Elevation</h3>
+<form method="POST">
+  <input type="hidden" name="axis" value="el">
+  <input type="hidden" name="delta" value="-5">
+  <button type="submit">▼ -5°</button>
+</form>
+<form method="POST">
+  <input type="hidden" name="axis" value="el">
+  <input type="hidden" name="delta" value="5">
+  <button type="submit">▲ +5°</button>
+</form>
+
+<h3>Current Angles</h3>
+<p>Azimuth: {az:.2f}°<br>Elevation: {el:.2f}°</p>
+
+</body>
+</html>
+"""
+
+
+# ---------------------------------------------------------
+# Setup motors
+# ---------------------------------------------------------
+# Using same shift register pins you told me earlier
 SHIFTER_DATA_PIN = 16
 SHIFTER_LATCH_PIN = 20
 SHIFTER_CLOCK_PIN = 21
 
-# (Optional) if you want to control a laser later, configure a pin here.
-# For now we will not toggle the laser automatically to keep things simple/safe.
-LASER_GPIO_PIN = None
-
-# --- Setup ---
-app = Flask(__name__)
-
-# Initialize hardware
 s = Shifter(data=SHIFTER_DATA_PIN, latch=SHIFTER_LATCH_PIN, clock=SHIFTER_CLOCK_PIN)
 
-# Use one multiprocessing.Lock for each motor as in your class
 lock_az = multiprocessing.Lock()
 lock_el = multiprocessing.Lock()
 
-# Instantiate two Steppers in the correct order (first Az then El)
-az_stepper = Stepper(s, lock_az)
-el_stepper = Stepper(s, lock_el)
+# Instantiation order defines motor index
+az_stepper = Stepper(s, lock_az)   # motor 0
+el_stepper = Stepper(s, lock_el)   # motor 1
 
-# Zero on startup (logical zero for calibration)
 az_stepper.zero()
 el_stepper.zero()
 
 
-# --- Helper functions ---
-def get_angles():
-    with az_stepper.angle.get_lock():
-        az = az_stepper.angle.value
-    with el_stepper.angle.get_lock():
-        el = el_stepper.angle.value
-    return float(az), float(el)
+# ---------------------------------------------------------
+# Server loop
+# ---------------------------------------------------------
+def run_server():
+    host, port = "", 8080
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.bind((host, port))
+    srv.listen(1)
 
-def relative_move(axis, delta_deg):
-    if axis == 'az':
-        az_stepper.rotate(float(delta_deg))
-    elif axis == 'el':
-        el_stepper.rotate(float(delta_deg))
-    else:
-        raise ValueError("bad axis")
+    print(f"Motor Control Server running on port {port}...")
+    print("Open: http://<your-pi-ip>:8080")
 
-def absolute_move(axis, angle_deg):
-    if axis == 'az':
-        az_stepper.goAngle(float(angle_deg))
-    elif axis == 'el':
-        el_stepper.goAngle(float(angle_deg))
-    else:
-        raise ValueError("bad axis")
+    while True:
+        conn, addr = srv.accept()
+        request = conn.recv(4096).decode("utf-8")
+        print(f"\nRequest from {addr}")
+        print(request)
+
+        if "POST" in request:
+            data = parsePOSTdata(request)
+            print("Parsed POST:", data)
+
+            try:
+                axis = data.get("axis")
+                delta = float(data.get("delta", 0))
+
+                if axis == "az":
+                    az_stepper.rotate(delta)
+                elif axis == "el":
+                    el_stepper.rotate(delta)
+
+            except Exception as e:
+                print("Error:", e)
+
+        # Read angles
+        with az_stepper.angle.get_lock():
+            az = az_stepper.angle.value
+        with el_stepper.angle.get_lock():
+            el = el_stepper.angle.value
+
+        # Build page
+        page = html_page(az, el)
+        response = (
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/html\r\n"
+            f"Content-Length: {len(page)}\r\n"
+            "Connection: close\r\n\r\n"
+            + page
+        )
+
+        conn.sendall(response.encode("utf-8"))
+        conn.close()
 
 
-# --- REST API ---
-@app.route('/')
-def index():
-    return send_file('control_page.html')
-
-@app.route('/api/angles', methods=['GET'])
-def api_angles():
-    az, el = get_angles()
-    return jsonify({"ok": True, "az": az, "el": el})
-
-@app.route('/api/move', methods=['POST'])
-def api_move():
-    """
-    JSON: {"axis":"az"|"el", "delta": <degrees>}
-    Example: {"axis":"az", "delta": 5}
-    """
-    data = request.get_json(force=True)
-    axis = data.get('axis')
-    delta = float(data.get('delta', 0.0))
+# ---------------------------------------------------------
+# Main
+# ---------------------------------------------------------
+if __name__ == "__main__":
     try:
-        relative_move(axis, delta)
-        return jsonify({"ok": True})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
-
-@app.route('/api/go', methods=['POST'])
-def api_go():
-    """
-    JSON: {"axis":"az"|"el", "angle": <degrees>}
-    """
-    data = request.get_json(force=True)
-    axis = data.get('axis')
-    angle = float(data.get('angle', 0.0))
-    try:
-        absolute_move(axis, angle)
-        return jsonify({"ok": True})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
-
-@app.route('/api/set_zero', methods=['POST'])
-def api_set_zero():
-    """
-    JSON: {"axis":"az"|"el"}
-    Sets the current position as zero for that axis (in-memory).
-    """
-    data = request.get_json(force=True)
-    axis = data.get('axis')
-    if axis == 'az':
-        az_stepper.zero()
-    elif axis == 'el':
-        el_stepper.zero()
-    else:
-        return jsonify({"ok": False, "error": "bad axis"}), 400
-    return jsonify({"ok": True})
-
-# Serve the field image you uploaded for convenience (optional)
-@app.route('/static/field_diagram')
-def field_diagram():
-    # local path from your upload (provided earlier)
-    return send_file('/mnt/data/504aa1b2-e1f5-4d32-a3e6-d773904686aa.png')
-
-# --- Run server ---
-if __name__ == '__main__':
-    try:
-        # Run on all interfaces so other devices on WiFi can reach it
-        app.run(host='0.0.0.0', port=5000, debug=False)
+        run_server()
     except KeyboardInterrupt:
-        pass
+        print("Stopping server...")
     finally:
-        # cleanup: stop outputs and cleanup GPIO
         try:
             s.shiftByte(0)
-        except Exception:
+        except:
             pass
         GPIO.cleanup()
