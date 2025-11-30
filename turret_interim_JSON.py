@@ -75,41 +75,27 @@ def load_positions():
 
 
 def process_positions():
-    """Separate our team, other teams, and globes."""
-    global positions, my_turret, other_turrets, globes
+    turrets = positions["turrets"]
+    globes = positions["globes"]
 
-    if positions is None:
-        return
-
-    turrets = positions.get("turrets", {})
-    globes = positions.get("globes", [])
-
+    MY_TEAM = "3"  # <--- OUR TEAM NUMBER
     my_turret = turrets.get(MY_TEAM)
-    
-    other_turrets = {
-        team: coords for team, coords in turrets.items()
-        if team != MY_TEAM
-    }
+    other_turrets = {t: c for t, c in turrets.items() if t != my_team}
 
-    # --- PRINT EVERYTHING FOR DEBUGGING ---
-    print("\n===== JSON DATA LOADED =====")
 
+    # --- PRINT EVERYTHING ---
     print("\n--- YOUR TURRET (Team 3) ---")
-    if my_turret:
-        print(f"Team {MY_TEAM}: r={my_turret['r']}, theta={my_turret['theta']}")
-    else:
-        print("ERROR: Team 3 not found in JSON!")
+    print(my_turret)
 
     print("\n--- OTHER TEAMS ---")
-    for team, coords in other_turrets.items():
-        print(f"Team {team}: r={coords['r']}, theta={coords['theta']}")
+    for t, c in other_turrets.items():
+        print(t, c)
 
     print("\n--- GLOBES ---")
-    for i, g in enumerate(globes):
-        print(f"Globe {i+1}: r={g['r']}, theta={g['theta']}, z={g['z']}")
+    for g in globes:
+        print(g)
 
     print("================================\n")
-
 
 # ===========================================================
 #              MOTOR + SERVER SECTION
@@ -278,7 +264,6 @@ if __name__ == "__main__":
     try:
         setup_motors()
 
-        global positions
         positions = load_positions()
         process_positions()  # <-- prints your turret, others, globes
 
