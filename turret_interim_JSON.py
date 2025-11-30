@@ -1,87 +1,152 @@
-# turret_interim.py
+# turret_interim_JSON.py
 #
-# Interim turret control:
-#  - Simple web page with two sliders (pan & tilt) -> PWM duty cycles
-#  - Also fetches positions.json from the router and shows r, theta
-#
-# Uses: socket, RPi.GPIO PWM, urllib.request, json
-#
+# Interim checkpoint with JSON loading:
+# - Reads turret + globe coordinates from a local file OR URL
+# - Separates our team (team 3)
+# - Provides /coords endpoint for debugging
+# - Everything else remains identical to your original server
 
 import socket
+import time
+import multiprocessing
 import json
 import urllib.request
+import os
 import RPi.GPIO as GPIO
 
-# -------------------- USER SETTINGS --------------------
+from shifter import Shifter
+from stepper_class_shiftregister_multiprocessing import Stepper
 
-# PWM pins for pan/tilt servos (BCM numbers)
-PAN_PIN  = 18      # change if your hardware uses different pins
-TILT_PIN = 13
 
-PWM_FREQ = 50      # typical for hobby servos
+# ----------------- CONFIG -----------------
 
-# URL for positions.json on the router  <<< CHANGE THIS TO MATCH YOUR LAB
-POS_URL = "http://192.168.1.254:8000/positions.json"
+# Shift register pins (BCM)
+DATA_PIN  = 16
+LATCH_PIN = 20
+CLOCK_PIN = 21
 
-# Your team ID as a string (key in the JSON file)  <<< CHANGE TO YOUR TEAM
-TEAM_ID = "3"
+# Slider limits
+AZ_MIN = -180
+AZ_MAX =  180
+EL_MIN = -90
+EL_MAX =  90
 
-# -------------------- GPIO / PWM SETUP --------------------
+HOST = ""   # listen on all interfaces
+PORT = 8080
 
-GPIO.setwarnings(False)
-GPIO.setmode(GPIO.BCM)
+# ---------- JSON CONFIG ----------
+USE_LOCAL_JSON = True
+LOCAL_JSON_FILE = "positions.json"
+JSON_URL = "http://192.168.1.254:8000/positions.json"
 
-GPIO.setup(PAN_PIN, GPIO.OUT)
-GPIO.setup(TILT_PIN, GPIO.OUT)
+MY_TEAM = "3"  # <--- OUR TEAM NUMBER
+# ---------------------------------
 
-pan_pwm  = GPIO.PWM(PAN_PIN, PWM_FREQ)
-tilt_pwm = GPIO.PWM(TILT_PIN, PWM_FREQ)
 
-# start at 0% duty (you can change if needed)
-pan_pwm.start(0)
-tilt_pwm.start(0)
+# Globals
+s = None
+m_az = None
+m_el = None
 
-# store current duty cycles so we can show them on the page
-pan_level  = 0
-tilt_level = 0
+positions = {}
+my_turret = None
+other_turrets = {}
+globes = []
 
-# store last r, theta we got from positions.json
-last_r = None
-last_theta = None
 
-# -------------------- HELPER FUNCTIONS --------------------
+# ===========================================================
+#       ### JSON LOADING SECTION ###
+# ===========================================================
 
-def set_pan(level):
-    """Set pan PWM duty cycle (0–100)."""
-    global pan_level
-    level = max(0, min(100, int(level)))
-    pan_level = level
-    pan_pwm.ChangeDutyCycle(level)
+def load_positions():
+    """Load turret/globe JSON from local file or URL."""
+    if USE_LOCAL_JSON:
+        if not os.path.exists(LOCAL_JSON_FILE):
+            print(f"ERROR: Local file '{LOCAL_JSON_FILE}' not found!")
+            return None
+        print(f"Loading JSON from local file: {LOCAL_JSON_FILE}")
+        with open(LOCAL_JSON_FILE, "r") as f:
+            return json.load(f)
+    else:
+        print(f"Loading JSON from URL: {JSON_URL}")
+        with urllib.request.urlopen(JSON_URL) as response:
+            data = response.read().decode("utf-8")
+            return json.loads(data)
 
-def set_tilt(level):
-    """Set tilt PWM duty cycle (0–100)."""
-    global tilt_level
-    level = max(0, min(100, int(level)))
-    tilt_level = level
-    tilt_pwm.ChangeDutyCycle(level)
+
+def process_positions():
+    """Separate our team, other teams, and globes."""
+    global positions, my_turret, other_turrets, globes
+
+    if positions is None:
+        return
+
+    turrets = positions.get("turrets", {})
+    globes = positions.get("globes", [])
+
+    my_turret = turrets.get(MY_TEAM)
+    
+    other_turrets = {
+        team: coords for team, coords in turrets.items()
+        if team != MY_TEAM
+    }
+
+    # --- PRINT EVERYTHING FOR DEBUGGING ---
+    print("\n===== JSON DATA LOADED =====")
+
+    print("\n--- YOUR TURRET (Team 3) ---")
+    if my_turret:
+        print(f"Team {MY_TEAM}: r={my_turret['r']}, theta={my_turret['theta']}")
+    else:
+        print("ERROR: Team 3 not found in JSON!")
+
+    print("\n--- OTHER TEAMS ---")
+    for team, coords in other_turrets.items():
+        print(f"Team {team}: r={coords['r']}, theta={coords['theta']}")
+
+    print("\n--- GLOBES ---")
+    for i, g in enumerate(globes):
+        print(f"Globe {i+1}: r={g['r']}, theta={g['theta']}, z={g['z']}")
+
+    print("================================\n")
+
+
+# ===========================================================
+#              MOTOR + SERVER SECTION
+# ===========================================================
+
+def setup_motors():
+    global s, m_az, m_el
+
+    GPIO.setwarnings(False)
+    GPIO.setmode(GPIO.BCM)
+
+    s = Shifter(data=DATA_PIN, latch=LATCH_PIN, clock=CLOCK_PIN)
+
+    lock1 = multiprocessing.Lock()
+    lock2 = multiprocessing.Lock()
+
+    m_az = Stepper(s, lock1)
+    m_el = Stepper(s, lock2)
+
+    m_az.zero()
+    m_el.zero()
+    print("Motors initialized at 0°.")
+
+
+# ---- HTTP Helpers ----
 
 def recv_request(conn):
-    """Read a small HTTP request and return it as text."""
-    return conn.recv(4096).decode("utf-8", errors="ignore")
+    return conn.recv(8192).decode("utf-8", errors="ignore")
 
 def parse_request_line(req_text):
-    """Return (method, path) from first line of HTTP request."""
     first = req_text.split("\r\n", 1)[0]
     parts = first.split()
-    if len(parts) >= 2:
-        return parts[0], parts[1]
-    return "GET", "/"
+    return parts[0], parts[1] if len(parts) >= 2 else ( "GET", "/" )
 
 def parse_post_body(req_text):
-    """Parse URL-encoded POST body into a dict."""
     i = req_text.find("\r\n\r\n")
-    if i < 0:
-        return {}
+    if i < 0: return {}
     body = req_text[i+4:]
     out = {}
     for pair in body.split("&"):
@@ -91,166 +156,139 @@ def parse_post_body(req_text):
     return out
 
 def send_html(conn, html):
-    conn.send(b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n")
-    conn.sendall(html.encode("utf-8"))
+    conn.sendall((
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/html\r\n"
+        "Connection: close\r\n\r\n"
+    ).encode() + html.encode())
 
-def fetch_position():
-    """
-    Fetch positions.json, extract this team's r, theta.
-    Updates last_r, last_theta and prints them.
-    """
-    global last_r, last_theta
+def send_json(conn, obj):
+    conn.sendall((
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/json\r\n"
+        "Connection: close\r\n\r\n"
+    ).encode() + obj.encode())
 
-    try:
-        with urllib.request.urlopen(POS_URL, timeout=1.0) as resp:
-            text = resp.read().decode("utf-8")
-        data = json.loads(text)
 
-        # Many labs use {"teams": {"7": {"r": ..., "theta": ...}, ...}}
-        if "teams" in data:
-            data = data["teams"]
-
-        # access by team id
-        entry = None
-        if isinstance(data, dict):
-            # team key might be "7" or 7 depending on server
-            if TEAM_ID in data:
-                entry = data[TEAM_ID]
-            elif TEAM_ID.isdigit() and int(TEAM_ID) in data:
-                entry = data[int(TEAM_ID)]
-
-        if isinstance(entry, dict):
-            # try a few common key names
-            r_val = entry.get("r", entry.get("R", 0.0))
-            t_val = entry.get("theta", entry.get("theta_deg", 0.0))
-
-            last_r = float(r_val)
-            last_theta = float(t_val)
-            print(f"positions.json -> team {TEAM_ID}: r = {last_r}, theta = {last_theta}")
-        else:
-            print("Team ID not found in positions.json")
-
-    except Exception as e:
-        print("Error fetching positions.json:", e)
-
-# -------------------- HTML PAGE --------------------
-
-def main_page():
-    """Return the HTML for the slider UI + current turret JSON position."""
-    if last_r is None or last_theta is None:
-        pos_text = "unknown (no JSON yet)"
-    else:
-        pos_text = f"r = {last_r:.2f}, θ = {last_theta:.1f}°"
-
+# ---- HTML PAGE SAME AS BEFORE ----
+def page_html():
     return f"""<!doctype html>
 <html>
-<head>
-  <meta charset="utf-8">
-  <title>Turret Interim Control</title>
-  <style>
-    body {{
-      font-family: system-ui, sans-serif;
-      max-width: 520px;
-      margin: 2rem;
-    }}
-    h2, h3 {{ margin-bottom: 0.3rem; }}
-    .row {{
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin: 10px 0;
-    }}
-    .name {{ width: 3rem; }}
-    .val  {{ width: 3rem; text-align: right; }}
-    input[type=range] {{ width: 260px; }}
-    .pos-box {{
-      padding: 0.5rem 0.8rem;
-      border: 1px solid #ccc;
-      border-radius: 6px;
-      background: #f9f9f9;
-      margin-top: 1rem;
-    }}
-  </style>
-</head>
+<head><meta charset="utf-8"><title>ENME441 Turret Control</title></head>
 <body>
-  <h2>Turret PWM Control (Interim)</h2>
+  <h1>IoT Laser Turret</h1>
 
-  <form action="/" method="POST">
-    <div class="row">
-      <div class="name">Pan</div>
-      <input type="range" name="pan" min="0" max="100" value="{pan_level}">
-      <div class="val">{pan_level}%</div>
-    </div>
+  <h2>Manual Control</h2>
 
-    <div class="row">
-      <div class="name">Tilt</div>
-      <input type="range" name="tilt" min="0" max="100" value="{tilt_level}">
-      <div class="val">{tilt_level}%</div>
-    </div>
-
-    <p><input type="submit" value="Update PWM"></p>
-  </form>
-
-  <div class="pos-box">
-    <h3>Server Turret Position (from positions.json)</h3>
-    <p>Team ID: <b>{TEAM_ID}</b></p>
-    <p>{pos_text}</p>
-    <p><small>Reload the page or move a slider to refresh.</small></p>
+  <div>
+    <label>Azimuth</label>
+    <input id="az" type="range" min="{AZ_MIN}" max="{AZ_MAX}" value="0">
+    <span id="az_val">0</span>°
   </div>
+
+  <div>
+    <label>Elevation</label>
+    <input id="el" type="range" min="{EL_MIN}" max="{EL_MAX}" value="0">
+    <span id="el_val">0</span>°
+  </div>
+
+  <button onclick="zeroAll()">Zero Motors</button>
+
+<script>
+async function sendAngle(axis, angle) {{
+  await fetch("/set", {{
+    method: "POST",
+    headers: {{ "Content-Type": "application/x-www-form-urlencoded" }},
+    body: "axis="+axis+"&angle="+angle
+  }});
+}}
+
+document.getElementById("az").oninput = e => {{
+  az_val.textContent = e.target.value;
+  sendAngle("az", e.target.value);
+}};
+document.getElementById("el").oninput = e => {{
+  el_val.textContent = e.target.value;
+  sendAngle("el", e.target.value);
+}};
+
+async function zeroAll() {{
+  await fetch("/zero", {{method:"POST"}});
+  az.value=0; el.value=0;
+  az_val.textContent=0; el_val.textContent=0;
+}}
+</script>
+
 </body>
-</html>
-"""
+</html>"""
 
-# -------------------- SERVER LOOP --------------------
 
-def run(host="", port=8080):
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.bind((host, port))
-    s.listen(3)
+# ---- POST Handlers ----
 
-    print(f"Serving http://{host or 'raspberrypi.local'}:{port}")
+def handle_post_set(req_text):
+    data = parse_post_body(req_text)
+    axis = data.get("axis", "")
+    angle = float(data.get("angle", "0"))
 
-    try:
-        while True:
-            conn, addr = s.accept()
-            try:
-                req = recv_request(conn)
-                method, path = parse_request_line(req)
+    if axis == "az":  m_az.goAngle(angle)
+    if axis == "el":  m_el.goAngle(angle)
 
-                # Always try to refresh JSON data once per request
-                fetch_position()
+def handle_post_zero():
+    m_az.zero()
+    m_el.zero()
 
-                if method == "POST":
-                    data = parse_post_body(req)
-                    # update PWM if fields present
-                    if "pan" in data:
-                        try:
-                            set_pan(data["pan"])
-                        except ValueError:
-                            pass
-                    if "tilt" in data:
-                        try:
-                            set_tilt(data["tilt"])
-                        except ValueError:
-                            pass
 
-                # For both GET and POST, send the same page
-                send_html(conn, main_page())
+# ---- MAIN SERVER LOOP ----
 
-            finally:
-                conn.close()
-    finally:
-        s.close()
+def run_server():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((HOST, PORT))
+    sock.listen(5)
 
-# -------------------- MAIN --------------------
+    print(f"Serving at http://raspberrypi.local:{PORT}")
+
+    while True:
+        conn, addr = sock.accept()
+        req = recv_request(conn)
+        method, path = parse_request_line(req)
+
+        if method == "GET":
+            if path == "/coords":
+                send_json(conn, json.dumps(positions, indent=2))
+            else:
+                send_html(conn, page_html())
+
+        elif method == "POST":
+            if path == "/set":
+                handle_post_set(req)
+                send_json(conn, '{"status":"ok"}')
+            elif path == "/zero":
+                handle_post_zero()
+                send_json(conn, '{"status":"zeroed"}')
+
+        conn.close()
+
+
+# ===========================================================
+#                     MAIN ENTRY
+# ===========================================================
 
 if __name__ == "__main__":
     try:
-        run("", 8080)
+        setup_motors()
+
+        global positions
+        positions = load_positions()
+        process_positions()  # <-- prints your turret, others, globes
+
+        run_server()
+
     except KeyboardInterrupt:
-        print("\nExiting.")
+        print("Shutting down...")
+
     finally:
-        pan_pwm.stop()
-        tilt_pwm.stop()
+        if s:
+            s.shiftByte(0)
         GPIO.cleanup()
+        print("GPIO cleaned up.")
