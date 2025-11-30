@@ -80,7 +80,7 @@ def process_positions():
 
     MY_TEAM = "3"  # <--- OUR TEAM NUMBER
     my_turret = turrets.get(MY_TEAM)
-    other_turrets = {t: c for t, c in turrets.items() if t != my_team}
+    other_turrets = {t: c for t, c in turrets.items() if t != MY_TEAM}
 
 
     # --- PRINT EVERYTHING ---
