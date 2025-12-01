@@ -24,7 +24,7 @@ EL_MAX =  90
 HOST = ""   # Listen on all interfaces
 PORT = 8080
 
-USE_LOCAL_JSON = True          # local json for testing
+USE_LOCAL_JSON = False          # local json for testing
 LOCAL_JSON_FILE = "positions.json"
 JSON_URL = "http://192.168.1.254:8000/positions.json"        # actual json url for final project
 
@@ -262,4 +262,5 @@ if __name__ == "__main__":
         if s:
             s.shiftByte(0)
         GPIO.cleanup()
+
         print("GPIO cleaned up.")
