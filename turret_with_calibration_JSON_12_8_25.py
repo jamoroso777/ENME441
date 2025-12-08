@@ -366,71 +366,71 @@ def run_server():
                 send_html(conn, page_html())
 
         elif method == "POST":     
-    if path == "/set":
-        handle_post_set(req)
-        send_json(conn, '{"status":"ok"}')
+            if path == "/set":
+                handle_post_set(req)
+                send_json(conn, '{"status":"ok"}')
 
-    elif path == "/zero":
-        handle_post_zero()
-        send_json(conn, '{"status":"zeroed"}')
+            elif path == "/zero":
+                handle_post_zero()
+                send_json(conn, '{"status":"zeroed"}')
 
-    # ---------------------------------------
-    # NEW: Aim at target (turret or globe)
-    # ---------------------------------------
-    elif path == "/aim":
-        data = parse_post_body(req)
-        target_type = data["type"]      # "turrets" or "globes"
-        target_id   = data["id"]        # turret number OR globe index
+            # ---------------------------------------
+            # NEW: Aim at target (turret or globe)
+            # ---------------------------------------
+            elif path == "/aim":
+                data = parse_post_body(req)
+                target_type = data["type"]      # "turrets" or "globes"
+                target_id   = data["id"]        # turret number OR globe index
 
-        aim_data = load_aim_file()["angles"]
-        angles = aim_data[target_type][str(target_id)] if target_type == "turrets" else \
-                 aim_data[target_type][int(target_id)]
+                aim_data = load_aim_file()["angles"]
+                angles = aim_data[target_type][str(target_id)] if target_type == "turrets" else \
+                         aim_data[target_type][int(target_id)]
 
-        m_az.goAngle(angles["az"])
-        m_el.goAngle(angles["el"])
+                m_az.goAngle(angles["az"])
+                m_el.goAngle(angles["el"])
 
-        send_json(conn, '{"status":"aimed"}')
+                send_json(conn, '{"status":"aimed"}')
 
-    # ---------------------------------------
-    # NEW: 1° Trim buttons
-    # ---------------------------------------
-    elif path == "/trim":
-        data = parse_post_body(req)
-        axis = data["axis"]             # "az" or "el"
-        amount = float(data["amount"])  # +1 or -1
+            # ---------------------------------------
+            # NEW: 1° Trim buttons
+            # ---------------------------------------
+            elif path == "/trim":
+                data = parse_post_body(req)
+                axis = data["axis"]             # "az" or "el"
+                amount = float(data["amount"])  # +1 or -1
 
-        if axis == "az":
-            new_angle = m_az.current_angle + amount
-            m_az.goAngle(new_angle)
-            m_az.current_angle = new_angle
+                if axis == "az":
+                    new_angle = m_az.current_angle + amount
+                    m_az.goAngle(new_angle)
+                    m_az.current_angle = new_angle
 
-        elif axis == "el":
-            new_angle = m_el.current_angle + amount
-            m_el.goAngle(new_angle)
-            m_el.current_angle = new_angle
+                elif axis == "el":
+                    new_angle = m_el.current_angle + amount
+                    m_el.goAngle(new_angle)
+                    m_el.current_angle = new_angle
 
-        send_json(conn, '{"status":"trimmed"}')
+                send_json(conn, '{"status":"trimmed"}')
 
-    # ---------------------------------------
-    # NEW: Save Calibration
-    # ---------------------------------------
-    elif path == "/save_cal":
-        data = parse_post_body(req)
-        t = data["type"]   # "turrets" or "globes"
-        i = data["id"]     # id number or index
+            # ---------------------------------------
+            # NEW: Save Calibration
+            # ---------------------------------------
+            elif path == "/save_cal":
+                data = parse_post_body(req)
+                t = data["type"]   # "turrets" or "globes"
+                i = data["id"]     # id number or index
 
-        aim = load_aim_file()
-        stored = aim["angles"][t][i] if t == "turrets" else aim["angles"][t][int(i)]
+                aim = load_aim_file()
+                stored = aim["angles"][t][i] if t == "turrets" else aim["angles"][t][int(i)]
 
-        # Save final trimmed angles as calibration offsets
-        aim["calibration"][f"{t[:-1]}_{i}_az"] = stored["az"]
-        aim["calibration"][f"{t[:-1]}_{i}_el"] = stored["el"]
+                # Save final trimmed angles as calibration offsets
+                aim["calibration"][f"{t[:-1]}_{i}_az"] = stored["az"]
+                aim["calibration"][f"{t[:-1]}_{i}_el"] = stored["el"]
 
-        save_aim_file(aim)
+                save_aim_file(aim)
 
-        send_json(conn, '{"status":"saved"}')
+                send_json(conn, '{"status":"saved"}')
 
-conn.close()
+        conn.close()
 
 
 
