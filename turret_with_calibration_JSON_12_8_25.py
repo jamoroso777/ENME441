@@ -12,7 +12,7 @@ from stepper_class_shiftregister_multiprocessing import Stepper
 
 
 # Global Variables:
-
+AIM_FILE = "aim_angles.json"
 DATA_PIN  = 16   # GPIO Pins
 LATCH_PIN = 20
 CLOCK_PIN = 21
@@ -452,4 +452,5 @@ if __name__ == "__main__":
         if s:
             s.shiftByte(0)
         GPIO.cleanup()
+
         print("GPIO cleaned up.")
