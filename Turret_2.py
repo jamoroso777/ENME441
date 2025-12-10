@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-turret_server_calibration.py
+turret_server_calibration.py (with laser on GPIO17 active-HIGH)
 
 - Relative manual control (±0.5°, ±1°, ±5°) via buttons
 - Dropdown of targets (turret1.. turretN, globe1.. globeM)
@@ -9,7 +9,7 @@ turret_server_calibration.py
 - "Reload Targets" reloads positions.json and recomputes raw angles
 - Zero Motors button
 - /angles endpoint to poll current motor angles
-- No field diagram served
+- Laser button fires laser for 3 seconds (GPIO17 active HIGH)
 """
 
 import socket
@@ -44,6 +44,10 @@ PORT = 8080
 ANGLE_TOLERANCE_DEG = 0.8
 
 CALIB_FILE = "calibration.json"
+
+# Laser settings
+LASER_PIN = 17        # GPIO17, active HIGH
+LASER_ON_SECONDS = 3  # seconds to fire
 
 # ------------------ Globals ------------------
 s = None
@@ -191,6 +195,25 @@ def setup_motors():
     m_az.zero()
     m_el.zero()
     print("Motors initialized and zeroed.")
+
+# ------------------ Laser setup ------------------
+def setup_laser():
+    GPIO.setup(LASER_PIN, GPIO.OUT)
+    GPIO.output(LASER_PIN, GPIO.LOW)   # ensure off
+
+def fire_laser():
+    """Turn laser on for LASER_ON_SECONDS (blocking inside thread)."""
+    try:
+        print("Laser ON")
+        GPIO.output(LASER_PIN, GPIO.HIGH)
+        time.sleep(LASER_ON_SECONDS)
+    finally:
+        GPIO.output(LASER_PIN, GPIO.LOW)
+        print("Laser OFF")
+
+def handle_laser_request():
+    """Start a thread to fire the laser so HTTP handler returns quickly."""
+    threading.Thread(target=fire_laser, daemon=True).start()
 
 # ------------------ Motor helpers ------------------
 def wait_for_motors(az_target, el_target, timeout=None):
@@ -346,6 +369,7 @@ button { padding: 8px 12px; margin: 6px; }
 <div class="sect">
   <h3>Manual</h3>
   <div><strong>Azimuth</strong><br>
+    <button onclick="api('/laser','POST')">Laser (3s)</button>
     <button onclick="step('az',-5)">◀ -5°</button>
     <button onclick="step('az',-1)">◀ -1°</button>
     <button onclick="step('az',-0.5)">◀ -0.5°</button>
@@ -540,6 +564,11 @@ def handle_save_calibration(req_text):
     # return the offsets in result dict
     return {"ok": True, "result": result}
 
+def handle_laser(req_text=None):
+    """Trigger laser in background and return quickly."""
+    handle_laser_request()
+    return {"ok": True, "message": f"Laser firing for {LASER_ON_SECONDS}s"}
+
 # ------------------ Server loop ------------------
 def run_server():
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -575,6 +604,8 @@ def run_server():
                     res = handle_reload(req); send_json(conn, res)
                 elif path == "/save_calibration":
                     res = handle_save_calibration(req); send_json(conn, res)
+                elif path == "/laser":
+                    res = handle_laser(req); send_json(conn, res)
                 else:
                     send_json(conn, {"ok": False, "error": "unknown POST"})
             else:
@@ -589,6 +620,7 @@ def run_server():
 if __name__ == "__main__":
     try:
         load_calibration()
+        setup_laser()
         setup_motors()
         ok = load_positions()
         if not ok:
