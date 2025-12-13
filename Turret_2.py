@@ -32,7 +32,7 @@ DATA_PIN  = 16
 LATCH_PIN = 20
 CLOCK_PIN = 21
 
-USE_LOCAL_JSON = False
+USE_LOCAL_JSON = True
 LOCAL_JSON_FILE = "positions.json"
 JSON_URL = "http://192.168.1.254:8000/positions.json"
 
@@ -639,4 +639,5 @@ if __name__ == "__main__":
             pass
         GPIO.cleanup()
         print("GPIO cleaned up.")
+
 
