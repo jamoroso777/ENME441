@@ -45,6 +45,8 @@ ANGLE_TOLERANCE_DEG = 0.8
 
 CALIB_FILE = "calibration.json"
 
+EL_INVERT = -1 #flip elevation direction
+
 # Laser settings
 LASER_PIN = 17        # GPIO17, active HIGH
 LASER_ON_SECONDS = 3  # seconds to fire
@@ -250,7 +252,8 @@ def manual_step(axis, delta):
     if axis == "az":
         m_az.rotate(float(delta))
     elif axis == "el":
-        m_el.rotate(float(delta))
+        m_el.rotate(EL_INVERT * float(delta))
+
 
 def set_zero():
     m_az.zero()
@@ -269,7 +272,7 @@ def goto_target(label):
             el_goal = float(tgt["el_deg_applied"])
             print(f"[GOTO] moving to {label}: AZ={az_goal:.2f}, EL={el_goal:.2f}")
             m_az.goAngle(az_goal)
-            m_el.goAngle(el_goal)
+            m_el.goAngle(EL_INVERT * el_goal)
             ok = wait_for_motors(az_goal, el_goal)
             print("[GOTO] done, reached:", ok)
         except Exception as e:
@@ -292,7 +295,7 @@ def save_calibration_for_label(label):
     with m_az.angle.get_lock():
         cur_az = float(m_az.angle.value)
     with m_el.angle.get_lock():
-        cur_el = float(m_el.angle.value)
+        cur_el = EL_INVERT*float(m_el.angle.value)
     # compute offsets: offset = current - raw
     # be careful with wrap-around for azimuth (want shortest signed difference)
     raw_az = float(raw["az"])
@@ -548,7 +551,7 @@ def handle_angles(req_text=None):
         with m_az.angle.get_lock():
             az = float(m_az.angle.value)
         with m_el.angle.get_lock():
-            el = float(m_el.angle.value)
+            el = EL_INVERT*float(m_el.angle.value)
         return {"ok": True, "az": az, "el": el}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -639,5 +642,3 @@ if __name__ == "__main__":
             pass
         GPIO.cleanup()
         print("GPIO cleaned up.")
-
-
